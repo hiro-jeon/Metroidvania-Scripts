@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Tilemaps;
 
 public class PlayerMovement : MonoBehaviour
 {
@@ -38,8 +39,8 @@ public class PlayerMovement : MonoBehaviour
 	private bool isHurting = false;
 	private bool isDead = false;
 
-	private bool onLadder = false;
-	private bool onWall = false;
+	private bool isOnLadder = false;
+	// private bool isOnWall = false;
 
 	private InputSystem_Actions controls;
 	
@@ -71,6 +72,7 @@ public class PlayerMovement : MonoBehaviour
 		if (isHurting || isDead) return ;
 		else if (isAttacking || isCrouching) return ;
 		else if (isDashing) return ;
+		else if (isOnLadder) return ;
 
 		Run();
 		PlayerDirection();
@@ -78,37 +80,48 @@ public class PlayerMovement : MonoBehaviour
 
 	private void Update()
 	{
-		if (onLadder)
+		if (isOnLadder)
 		{
+			if (isHurting || isDead || jumpPressed)
+			{
+				isOnLadder = false;
+				animator.speed = 1f; 
+				rb.gravityScale = 1;
+				animator.SetBool("IsOnLadder", false);
+
+				if (jumpPressed)
+				{
+					Vector2 direction = new Vector2(moveInput.x, 0.5f).normalized;
+					rb.AddForce(direction * jumpForce, ForceMode2D.Impulse);
+					jumpPressed = false;
+					return ;
+				}
+			}
 			rb.linearVelocity = new Vector2(0, moveInput.y * climbSpeed);
 			rb.gravityScale = 0;
 
+			// 가만히 있을 때/ 움직일 때 애니메이션
 			if (Mathf.Abs(moveInput.y) > 0)
-			{
-				animator.Play("Climb");
 				animator.speed = 1f;
-			}
 			else
-			{
-				animator.Play("Climb");
 				animator.speed = 0f;
-
-			}
 			return ; 
 		}
-		else
-		{
-			rb.gravityScale = 1;
-			animator.speed = 1f;
-		}
 
+		// 피격 중에는 아무것도 못함 ... 애니메이션 종료 시 Flag Off
 		if (isHurting || isDead) return ;
+
+		// 공격 중에도 아무것도 못함 ... 애니메이션 종료 시 Flag Off
 		else if (isAttacking) return ;
-		// 대시 중에는 
+
+		// Hurt는 Update가 아닌 TriggerEnter2D 에서 정의
 		else if (isDashing)
 		{
+			// 대시 중에는 DashAttack/Slide/Hurt 를 할 수 있다
+			if (!(attackPressed || crouchPressed)) return ;
+
 			// Dash Attack
-			if (attackPressed)
+			else if (attackPressed)
 			{
 				EndDash();
 				animator.SetTrigger("Attack");
@@ -120,33 +133,39 @@ public class PlayerMovement : MonoBehaviour
 				SetCrouchCollider(true);
 				animator.SetTrigger("Slide");
 			}
-			// 나머지 불가
-			else return ;
 		}
+
+		// 앉는 중에는 Hurt/앉기 해제를 할 수 있다
+		// Hurt는 Update가 아닌 TriggerEnter2D 에서 정의
 		else if (isCrouching)
 		{
-			// 앉기 해제
-			if (!crouchPressed)
+			if (crouchPressed) return ;
+			// 앉기 버튼 뗌
+			else if (!crouchPressed)
 			{
 				isCrouching = false;
 				animator.SetBool("IsCrouching", false);
 				SetCrouchCollider(false);
 			}
-			else return ;
 		}
+
 		CheckGrounded();
 
+		// 
 		animator.SetFloat("Speed", Mathf.Abs(moveInput.x));
+
+		// 
 		animator.SetBool("IsFalling", !isGrounded && rb.linearVelocity.y < 0f);
 		animator.SetBool("IsJumping", !isGrounded && rb.linearVelocity.y > 0f);
 
-		// 앉기
+		// 앉기 버튼 눌림
 		if (crouchPressed && !isCrouching)
 		{
 			isCrouching = true;
 			animator.SetBool("IsCrouching", true);
 			SetCrouchCollider(true);
 		}
+
 		// Trigger
 		if (isGrounded)
 		{
@@ -175,19 +194,24 @@ public class PlayerMovement : MonoBehaviour
 
 	private void OnTriggerEnter2D(Collider2D hit)
 	{
-		float rand = Random.Range(0f, 1f);
-
+		// Hurt
 		if (hit.gameObject.layer == LayerMask.NameToLayer("Obstacle") && !isHurting)
 		{
+			isHurting = true; // player.TakeDamage();
+
+			// 밀려나가는 효과
 			Vector2 direction = transform.position - hit.transform.position;
 			rb.linearVelocity = Vector2.zero;
 			rb.AddForce(direction.normalized * damageForce, ForceMode2D.Impulse);
 
-			isHurting = true; // player.TakeDamage();
 			if (!isAttacking && !isDashing)
 			{
+				// 애니메이션 사용할 건지
 				animator.SetTrigger("Hurt");
 			}
+
+			// 만약 죽으면
+			float rand = Random.Range(0f, 1f); // 디버그용 변수값
 
 			if (rand > 0.8f)
 			{
@@ -199,7 +223,47 @@ public class PlayerMovement : MonoBehaviour
 
 	private void OnTriggerStay2D(Collider2D ladder)
 	{
-		
+		// 사다리 진입 조건: ladder에 돌입 && 방향키 위 버튼 입력
+		if (!isOnLadder && ladder.gameObject.layer == LayerMask.NameToLayer("Ladder"))
+		{
+			if (moveInput.y > 0)
+			{
+				Tilemap tilemap = ladder.GetComponent<Tilemap>();
+				
+				var dist = standingCollider.Distance(ladder);
+
+				// 사다리 위치에 고정시키기 위한 것들
+				if (!dist.isOverlapped)
+					return ;
+				Vector2 contact = (dist.pointA + dist.pointB) * 0.5f; 
+				Vector3Int tilePos = tilemap.WorldToCell(contact); // Position => Grid
+				if (tilemap.HasTile(tilePos) == false)
+					return ;
+
+				Vector3 ladderPos = tilemap.GetCellCenterWorld(tilePos);
+
+				isOnLadder = true;
+				rb.linearVelocity = Vector2.zero; 
+				transform.position = new Vector3(ladderPos.x, transform.position.y, 0); 
+				animator.SetBool("IsOnLadder", true); // 애니메이션
+			}
+		}
+	}
+
+	private void OnTriggerExit2D(Collider2D ladder)
+	{
+		// 사다리 탈출 조건 1
+		if (isOnLadder)
+		{
+			isOnLadder = false;
+
+			// 아래 두개는 사다리 탈출 시 반드시
+			animator.speed = 1f; 
+			rb.gravityScale = 1;
+
+			animator.SetBool("IsOnLadder", false);
+			// animator.SetTrigger("UpToFall"); // => uptofall => [idle/run/jump/fall]
+		}
 	}
 
 	private void EndDeath()
