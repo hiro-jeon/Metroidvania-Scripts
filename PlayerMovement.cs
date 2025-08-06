@@ -4,6 +4,7 @@ using UnityEngine.Tilemaps;
 
 public class PlayerMovement : MonoBehaviour
 {
+	public LayerMask ladderLayer;
 	public LayerMask groundLayer;
 	public Transform groundCheck;
 	public float groundCheckDistance = 0.1f;
@@ -16,7 +17,7 @@ public class PlayerMovement : MonoBehaviour
 	public float moveSpeed = 2f;
 	public float climbSpeed = 2f;
 
-	// Crouch
+	// Collider
 	public CapsuleCollider2D standingCollider;
 	public CapsuleCollider2D crouchingCollider;
 
@@ -30,6 +31,8 @@ public class PlayerMovement : MonoBehaviour
 	private bool crouchPressed = false;
 
 	private bool isGrounded = false;
+	private bool isLadder = false;
+
 	private bool isCrouching = false;
 	private bool isRunning = false;
 
@@ -149,12 +152,17 @@ public class PlayerMovement : MonoBehaviour
 			}
 		}
 
-		CheckGrounded();
+		CheckFloor();
 
-		// 
+		// 사다리 진입 조건: 바닥에 ladder && Down 키
+		if (!isOnLadder && isLadder && moveInput.y < 0)
+		{
+			// 2. 콜라이더 통과
+			Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("Player"), LayerMask.NameToLayer("Ground"), true);
+		}
+
 		animator.SetFloat("Speed", Mathf.Abs(moveInput.x));
 
-		// 
 		animator.SetBool("IsFalling", !isGrounded && rb.linearVelocity.y < 0f);
 		animator.SetBool("IsJumping", !isGrounded && rb.linearVelocity.y > 0f);
 
@@ -192,31 +200,35 @@ public class PlayerMovement : MonoBehaviour
 		jumpPressed = false;
 	}
 
-	private void OnTriggerEnter2D(Collider2D hit)
+	private void OnCollisionEnter2D(Collision2D col)
 	{
 		// Hurt
-		if (hit.gameObject.layer == LayerMask.NameToLayer("Obstacle") && !isHurting)
+		if (!isHurting)
 		{
-			isHurting = true; // player.TakeDamage();
-
-			// 밀려나가는 효과
-			Vector2 direction = transform.position - hit.transform.position;
-			rb.linearVelocity = Vector2.zero;
-			rb.AddForce(direction.normalized * damageForce, ForceMode2D.Impulse);
-
-			if (!isAttacking && !isDashing)
+			if (col.gameObject.layer == LayerMask.NameToLayer("Obstacle"))
 			{
-				// 애니메이션 사용할 건지
-				animator.SetTrigger("Hurt");
-			}
+				isHurting = true; // player.TakeDamage();
 
-			// 만약 죽으면
-			float rand = Random.Range(0f, 1f); // 디버그용 변수값
+				// 밀려나가는 효과
+				Vector2 direction = transform.position - col.transform.position;
+				rb.linearVelocity = Vector2.zero;
+				rb.AddForce(direction.normalized * damageForce, ForceMode2D.Impulse);
 
-			if (rand > 0.8f)
-			{
-				isDead = true; 
-				animator.SetTrigger("Death"); // player.Death();
+				if (!isAttacking && !isDashing)
+				{
+					// 애니메이션 사용할 건지
+					animator.SetTrigger("Hurt");
+				}
+
+				// 만약 죽으면
+				float rand = Random.Range(0f, 1f); // 디버그용 변수값
+
+				if (rand > 0.8f)
+				{
+					isDead = true; 
+					animator.SetTrigger("Death"); // player.Death();
+				}
+				isHurting = false;
 			}
 		}
 	}
@@ -226,13 +238,12 @@ public class PlayerMovement : MonoBehaviour
 		// 사다리 진입 조건: ladder에 돌입 && 방향키 위 버튼 입력
 		if (!isOnLadder && ladder.gameObject.layer == LayerMask.NameToLayer("Ladder"))
 		{
-			if (moveInput.y > 0)
+			if (moveInput.y != 0)
 			{
+				// 1. 사다리 좌표 x값에 플레이어 고정 
 				Tilemap tilemap = ladder.GetComponent<Tilemap>();
-				
 				var dist = standingCollider.Distance(ladder);
 
-				// 사다리 위치에 고정시키기 위한 것들
 				if (!dist.isOverlapped)
 					return ;
 				Vector2 contact = (dist.pointA + dist.pointB) * 0.5f; 
@@ -246,23 +257,32 @@ public class PlayerMovement : MonoBehaviour
 				rb.linearVelocity = Vector2.zero; 
 				transform.position = new Vector3(ladderPos.x, transform.position.y, 0); 
 				animator.SetBool("IsOnLadder", true); // 애니메이션
+													  //
+				// 2. 콜라이더 통과
+				Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("Player"), LayerMask.NameToLayer("Ground"), true);
 			}
 		}
 	}
 
 	private void OnTriggerExit2D(Collider2D ladder)
 	{
-		// 사다리 탈출 조건 1
-		if (isOnLadder)
+		if (ladder.gameObject.layer == LayerMask.NameToLayer("Ladder"))
 		{
-			isOnLadder = false;
+			// 사다리 탈출 조건 1
+			if (isOnLadder)
+			{
+				isOnLadder = false;
 
-			// 아래 두개는 사다리 탈출 시 반드시
-			animator.speed = 1f; 
-			rb.gravityScale = 1;
+				// 아래 두개는 사다리 탈출 시 반드시
+				animator.speed = 1f; 
+				rb.gravityScale = 1;
 
-			animator.SetBool("IsOnLadder", false);
-			// animator.SetTrigger("UpToFall"); // => uptofall => [idle/run/jump/fall]
+				animator.SetBool("IsOnLadder", false);
+				standingCollider.enabled = true;
+
+				// animator.SetTrigger("UpToFall"); // => uptofall => [idle/run/jump/fall]
+			}
+			Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("Player"), LayerMask.NameToLayer("Ground"), false);
 		}
 	}
 
@@ -288,9 +308,10 @@ public class PlayerMovement : MonoBehaviour
 		isAttacking = false;
 	}
 
-	private void CheckGrounded()
+	private void CheckFloor()
 	{
 		isGrounded = Physics2D.Raycast(groundCheck.position, Vector2.down, groundCheckDistance, groundLayer);
+		isLadder = Physics2D.Raycast(groundCheck.position, Vector2.down, groundCheckDistance, ladderLayer);
 	}
 
 	private void OnEnable()
