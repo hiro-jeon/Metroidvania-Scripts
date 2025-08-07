@@ -1,22 +1,24 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Tilemaps;
+using System.Collections;
 
 public class PlayerMovement : MonoBehaviour
 {
+	[Header("Raycast")]
 	public LayerMask ladderLayer;
 	public LayerMask groundLayer;
-	public Transform groundCheck;
-	public float groundCheckDistance = 0.1f;
-
-	public float crouchSize = 0.5f;
+	public float raycastDist = 0.1f;
 
 	[Header("Movement")]
-	public float damageForce = 5f;
+	public float crouchSize = 0.5f;
+	public float freezingForce = 5f;
 	public float dashForce = 3f;
 	public float jumpForce = 3f;
 	public float moveSpeed = 2f;
 	public float climbSpeed = 2f;
+	public float immortalTime = 2f;
+	public float freezingTime = 0.5f;
 
 	[Header("Attack")]
 	public BoxCollider2D attackCollider;
@@ -51,6 +53,8 @@ public class PlayerMovement : MonoBehaviour
 
 	private bool isOnLadder = false;
 	// private bool isOnWall = false;
+	//
+	private Coroutine freezingCoroutine;
 
 	private InputSystem_Actions controls;
 	
@@ -92,6 +96,7 @@ public class PlayerMovement : MonoBehaviour
 
 	private void Update()
 	{
+		// 전부 사다리 관련
 		if (isOnLadder)
 		{
 			if (isHurting || isDead || jumpPressed)
@@ -106,8 +111,8 @@ public class PlayerMovement : MonoBehaviour
 					Vector2 direction = new Vector2(moveInput.x, 0.5f).normalized;
 					rb.AddForce(direction * jumpForce, ForceMode2D.Impulse);
 					jumpPressed = false;
-					return ;
 				}
+				return ;
 			}
 			rb.linearVelocity = new Vector2(0, moveInput.y * climbSpeed);
 			rb.gravityScale = 0;
@@ -121,7 +126,11 @@ public class PlayerMovement : MonoBehaviour
 		}
 
 		// 피격 중에는 아무것도 못함 ... 애니메이션 종료 시 Flag Off
-		if (isHurting || isDead) return ;
+		if (isHurting || isDead)
+		{
+			animator.SetFloat("Speed", 0); // 땜빵용
+			return ;
+		}
 
 		// 공격 중에도 아무것도 못함 ... 애니메이션 종료 시 Flag Off
 		else if (isAttacking) return ;
@@ -221,14 +230,17 @@ public class PlayerMovement : MonoBehaviour
 				// 밀려나가는 효과
 				Vector2 direction = transform.position - col.transform.position;
 				rb.linearVelocity = Vector2.zero;
-				rb.AddForce(direction.normalized * damageForce, ForceMode2D.Impulse);
+				rb.AddForce(direction.normalized * freezingForce, ForceMode2D.Impulse);
 
 				if (!isAttacking && !isDashing)
 				{
 					// 애니메이션 사용할 건지
 					animator.SetTrigger("Hurt");
 				}
+				if (freezingCoroutine == null)
+					freezingCoroutine = StartCoroutine(Freezing());
 
+				/*
 				// 만약 죽으면
 				float rand = Random.Range(0f, 1f); // 디버그용 변수값
 
@@ -238,6 +250,7 @@ public class PlayerMovement : MonoBehaviour
 					animator.SetTrigger("Death"); // player.Death();
 				}
 				isHurting = false;
+				*/
 			}
 		}
 	}
@@ -300,11 +313,15 @@ public class PlayerMovement : MonoBehaviour
 		gameObject.SetActive(false);
 	}
 
-	private void EndHurt()
+	private IEnumerator Freezing()
 	{
+		Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("Player"), LayerMask.NameToLayer("Enemy"), true);
+		yield return new WaitForSeconds(freezingTime);
 		isHurting = false;
+		yield return new WaitForSeconds(immortalTime - freezingTime);
+		Physics2D.IgnoreLayerCollision(LayerMask.NameToLayer("Player"), LayerMask.NameToLayer("Enemy"), false);
+		freezingCoroutine = null;
 	}
-
 
 	private void StartAttack()
 	{
@@ -333,8 +350,8 @@ public class PlayerMovement : MonoBehaviour
 
 	private void CheckFloor()
 	{
-		isGrounded = Physics2D.Raycast(groundCheck.position, Vector2.down, groundCheckDistance, groundLayer);
-		isLadder = Physics2D.Raycast(groundCheck.position, Vector2.down, groundCheckDistance, ladderLayer);
+		isGrounded = Physics2D.Raycast(transform.position, Vector2.down, raycastDist, groundLayer);
+		isLadder = Physics2D.Raycast(transform.position, Vector2.down, raycastDist, ladderLayer);
 	}
 
 	private void OnEnable()
