@@ -6,22 +6,27 @@ public class Enemy : MonoBehaviour
 	public Animator animator;
 	public Rigidbody2D rb;
 
+	[Header("Stats")]
+	public int hp = 1;
+
+	[Header("Move")]
 	public float moveSpeed = 1f;
 	public float chasingTime = 6f;
 	public float maxChangeTime = 6f;
 	public float damagedForce = 3f;
 	public bool isAir = false;
 
+	[Header("Layer")]
 	public LayerMask targetLayer;
 	public LayerMask groundLayer;
 
+	private bool isEdge = false;
 	private bool isChasing = false;
+	private bool isHurting = false;
 
 	private Transform player;
 	private Vector2 direction;
 	private Vector2 move = Vector2.zero;
-
-	private bool isEdge = false;
 
 	private Coroutine randomCoroutine;
 	private Coroutine chaseCoroutine;
@@ -32,23 +37,17 @@ public class Enemy : MonoBehaviour
 			randomCoroutine = StartCoroutine(SetRandomDirection());
 		else if (isChasing && chaseCoroutine == null)
 			chaseCoroutine = StartCoroutine(SetDirectionToPlayer());
-
-		// 끝일 경우 속도 0
-		move = !isEdge ? direction : Vector2.zero;
+		move = !isEdge ? direction : Vector2.zero; // 모서리일 경우 속도 0
 
 		animator.SetFloat("Speed", Mathf.Abs(move.x));
 	}
 
 	private void FixedUpdate()
 	{
-		isEdge = !Physics2D.Raycast(transform.position, Vector2.down + direction, 0.1f, groundLayer);
+		isEdge = !Physics2D.Raycast(transform.position, Vector2.down + move, 0.1f, groundLayer);
 
-		Move(move);
-
-		if (move.x > 0)
-			transform.localScale = Vector3.one;
-		else if (move.x < 0)
-			transform.localScale = new Vector3(-1, 1, 1);
+		Move();
+		Flip();
 	}
 
 	private void OnTriggerStay2D(Collider2D hit)
@@ -57,20 +56,28 @@ public class Enemy : MonoBehaviour
 		{
 			if (hit.gameObject.layer == LayerMask.NameToLayer("Player") && hit is CapsuleCollider2D)
 			{
-				Debug.Log("플레이어 확인");
 				player = hit.transform;
-				StartCoroutine(ChasePlayer());
+				StartCoroutine(EnableChasing());
 			}
 		}
 	}
 
-	private void OnDamaged()
+	public void TakeDamage(int damage)
 	{
-		rb.AddForce(-direction * damagedForce, ForceMode2D.Impulse);
-		animator.SetTrigger("Hurt");
+		if (!isHurting)
+		{
+			hp -= damage;
+			// rb.linearVelocity = Vector2.zero;
+			rb.AddForce(-move * damagedForce, ForceMode2D.Impulse);
+
+			isHurting = true;
+			animator.SetTrigger("Damaged");
+			if (hp < 0)
+				animator.SetTrigger("Dead");
+		}
 	}
 
-	private IEnumerator ChasePlayer()
+	private IEnumerator EnableChasing()
 	{
 		isChasing = true;
 		yield return new WaitForSeconds(chasingTime);
@@ -100,10 +107,29 @@ public class Enemy : MonoBehaviour
 		chaseCoroutine = null;
 	}
 
-	private void Move(Vector2 direction)
+	private void Move()
 	{
 		Vector2 velocity = rb.linearVelocity;
-		velocity.x = direction.x * moveSpeed;
+		velocity.x = move.x * moveSpeed;
 		rb.linearVelocity = velocity;
+	}
+
+	private void Flip()
+	{
+		if (move.x > 0)
+			transform.localScale = Vector3.one;
+		else if (move.x < 0)
+			transform.localScale = new Vector3(-1, 1, 1);
+	}
+
+	private void OnDamageEnd()
+	{
+		isHurting = false;
+	}
+
+	private void OnDeadEnd()
+	{
+		isHurting = false;
+		gameObject.SetActive(false);
 	}
 }

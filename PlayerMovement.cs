@@ -11,13 +11,20 @@ public class PlayerMovement : MonoBehaviour
 
 	public float crouchSize = 0.5f;
 
+	[Header("Movement")]
 	public float damageForce = 5f;
 	public float dashForce = 3f;
 	public float jumpForce = 3f;
 	public float moveSpeed = 2f;
 	public float climbSpeed = 2f;
 
-	// Collider
+	[Header("Attack")]
+	public BoxCollider2D attackCollider;
+	public int damage;
+	public LayerMask enemyLayer;
+	private ContactFilter2D contactFilter;
+
+	[Header("Body")]
 	public CapsuleCollider2D standingCollider;
 	public CapsuleCollider2D crouchingCollider;
 
@@ -49,25 +56,27 @@ public class PlayerMovement : MonoBehaviour
 	
 	private void Awake()
 	{
+		// 서있는 콜라이더 쓸거임
 		standingCollider.enabled = true;
 		crouchingCollider.enabled = false;
 
+		// 싹 다 Input System 관련
 		controls = new InputSystem_Actions();
-		
 		controls.Player.Run.performed += ctx => moveInput = ctx.ReadValue<Vector2>();
 		controls.Player.Run.canceled += ctx => moveInput = Vector2.zero;
-
 		controls.Player.Jump.performed += ctx => jumpPressed = true;
 		controls.Player.Jump.canceled += ctx => jumpPressed = false;
-
 		controls.Player.Attack.performed += ctx => attackPressed = true;
 		controls.Player.Attack.canceled += ctx => attackPressed = false;
-
 		controls.Player.Dash.performed += ctx => dashPressed = true;
 		controls.Player.Dash.canceled += ctx => dashPressed = false;
-
 		controls.Player.Crouch.performed += ctx => crouchPressed = true;
 		controls.Player.Crouch.canceled += ctx => crouchPressed = false;
+
+		// 콘택트 필터 설정
+		contactFilter = new ContactFilter2D();
+		contactFilter.SetLayerMask(enemyLayer);
+		contactFilter.useTriggers = true;
 	}
 
 	private void FixedUpdate()
@@ -205,7 +214,7 @@ public class PlayerMovement : MonoBehaviour
 		// Hurt
 		if (!isHurting)
 		{
-			if (col.gameObject.layer == LayerMask.NameToLayer("Obstacle"))
+			if (col.gameObject.layer == LayerMask.NameToLayer("Enemy"))
 			{
 				isHurting = true; // player.TakeDamage();
 
@@ -297,12 +306,26 @@ public class PlayerMovement : MonoBehaviour
 	}
 
 
-	void StartAttack()
+	private void StartAttack()
 	{
 		isAttacking = true;
 	}
 
-	void EndAttack()
+	private void Attack()
+	{
+		Collider2D[] hits = new Collider2D[10];
+		Enemy enemy;
+
+		int count = attackCollider.Overlap(contactFilter, hits);
+		for (int i=0; i<count; i++)
+		{
+			enemy = hits[i].GetComponent<Enemy>();
+			if (hits[i] is BoxCollider2D && enemy)
+				enemy.TakeDamage(damage);
+		}
+	}
+
+	private void EndAttack()
 	{
 		isDashing = false;
 		isAttacking = false;
